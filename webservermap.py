@@ -6,6 +6,7 @@ import re
 from urllib.parse import parse_qsl, urlparse
 import redis
 from html.parser import HTMLParser
+import html
 
 # Código basado en:
 # https://realpython.com/python-http-server/
@@ -15,17 +16,22 @@ from html.parser import HTMLParser
 
 class MyHTMLParser(HTMLParser):
 
-    def __init__(self):
+    def __init__(self, tagArray: tuple, tagValue: str):
         super().__init__()
         self.data = []
         self.capture = False
+        self.tagArray = tagArray
+        self.tagValue = tagValue
 
     def handle_starttag(self, tag, attrs):
-        if tag in ('h2'):
-            self.capture = True
+        if tag in self.tagArray:
+            for name, value in attrs:
+                if name == 'id' and value == self.tagValue:
+                    print('Encountered a start tag:', tag)
+                    self.capture = True
 
     def handle_endtag(self, tag):
-        if tag in ('h2'):
+        if tag in self.tagArray:
             self.capture = False
 
     def handle_data(self, data):
@@ -120,21 +126,41 @@ class WebRequestHandler(BaseHTTPRequestHandler):
             title = query_data.get('title')
             description = query_data.get('description')
             not_none_params = [i for i in params if i is not None]
-            for param in not_none_params:
-                if param.lower() in book_data.lower():
-                    books_found.add(book)
+
+            if title:
+                title_parser = MyHTMLParser(('h2'), 'title')
+                title_parser.feed(book_data)
+                if title.lower() not in title_parser.data[0].lower():
+                    continue
+            if author:
+                author_parser = MyHTMLParser(('p'), 'author')
+                author_parser.feed(book_data)
+                print(author_parser.data[0].lower(), author.lower())
+                if author.lower() not in author_parser.data[0].lower():
+                    continue
+            if description:
+                description_parser = MyHTMLParser(('p'), 'description')
+                description_parser.feed(book_data)
+                if description.lower() not in description_parser.data[0].lower():
+                    continue
+
+            print('Book found: ', book)
+            books_found.add(book)
+
         r.connection_pool.disconnect()
+
         print('Books found: ', books_found)
-        if books_found:
-            with open('html/books/search.html') as f:
+        with open('html/books/search.html') as f:
                 response = f.read()
+        if books_found:
                 for book in books_found:
                     book_data = r.get(book)
-                    parser = MyHTMLParser()
-                    parser.feed(book_data)
-                    response += f'<li><a href="/books/{book.split("book")[1]}">{parser.data[0]}</a></li>'
-            return self.wfile.write(response.encode("utf-8"))
-        return self.wfile.write('No books found'.encode("utf-8"))
+                    title_parser = MyHTMLParser(('h2'), 'title')
+                    title_parser.feed(book_data)
+                    response += f'<br><li><a href="/books/{book.split("book")[1]}">{title_parser.data[0]}</a></li>'
+                return self.wfile.write(response.encode("utf-8"))
+        response += '<p>No books found</p>'
+        return self.wfile.write(response.encode("utf-8"))
 
 def set_redis_keys():
     r = redis.StrictRedis(host='localhost', port=6379, db=0)
