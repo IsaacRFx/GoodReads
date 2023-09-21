@@ -40,35 +40,36 @@ class WebRequestHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "text/html")
         self.end_headers()
-        self.wfile.write(self.get_response())
+        self.wfile.write(self.get_response().encode("utf-8")) #if isinstance(self.get_response(), str) else self.get_response())
 
 
     def validate_endpoint(self):
         
         endpoint = self.url.path.split('/')[1].lower()
         indexPath = f"index.html"
-        commonPath = f'html{self.url.path}.html'
+        commonPath = f'html{self.url.path}'
         parsedPath = f"{endpoint}{self.url.path.split('/')[-1]}.html"
-        print(endpoint)
         if endpoint == "":
             return indexPath
-        if os.path.isfile(commonPath):
-            return parsedPath
+        elif os.path.isfile(commonPath):
+            print(commonPath)
+            return commonPath.split('/')[-1]
         return parsedPath
+    
 
     def get_response(self):
         isValidEndpoint = self.validate_endpoint()
+        print(isValidEndpoint)
         if not isValidEndpoint:
             return """404 Not Found"""
-        if not isValidEndpoint.endswith('.html'):
-            return """404 Not Found"""
-        r = redis.StrictRedis(host='localhost', port=6379, db=0)
+        r = redis.StrictRedis(host='localhost', port=6379, db=0, charset="utf-8", decode_responses=True)
         keyExists = r.exists(f'{isValidEndpoint}')
         if keyExists == 1:
             print(f'Key {isValidEndpoint} exists')
             f = r.get(f'{isValidEndpoint}')
             return f
         r.connection_pool.disconnect()
+        print("Key doesn't exist")
         return """404 Not Found"""
 
 def set_redis_keys():
