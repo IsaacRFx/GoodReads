@@ -5,6 +5,7 @@ import os
 import re
 from urllib.parse import parse_qsl, urlparse
 import redis
+from html.parser import HTMLParser
 
 # Código basado en:
 # https://realpython.com/python-http-server/
@@ -12,10 +13,29 @@ import redis
 # https://docs.python.org/3/library/http.cookies.html
 
 
+class MyHTMLParser(HTMLParser):
+
+    def __init__(self):
+        super().__init__()
+        self.data = []
+        self.capture = False
+
+    def handle_starttag(self, tag, attrs):
+        if tag in ('h2'):
+            self.capture = True
+
+    def handle_endtag(self, tag):
+        if tag in ('h2'):
+            self.capture = False
+
+    def handle_data(self, data):
+        if self.capture:
+            self.data.append(data)
+
 mapping = [
-    (r"^/books/(?P<book_id>\d+)$", "get_book"),
     (r"^/$", "get_index"),
-    (r"^/search$", "get_search"),
+    (r"^/books/(?P<book_id>\d+)$", "get_book"),
+    (r"^/books/search$", "get_search_books"),
     (r"^/results$", "get_results"),
 ]
 
@@ -81,13 +101,48 @@ class WebRequestHandler(BaseHTTPRequestHandler):
         with open ("html/index.html", "r") as f:
             response = f.read()
         return self.wfile.write(response.encode("utf-8"))
+    
+    def get_search_books(self):
+        query_data = dict(parse_qsl(self.url.query))
+        print(query_data)
+        params = [query_data.get('author'), query_data.get('title'), query_data.get('description')]
+        if not any(params):
+            with open('html/books/search.html') as f:
+                response = f.read()
+            return self.wfile.write(response.encode("utf-8"))
+
+        r = redis.StrictRedis(host='localhost', port=6379, db=0, charset="utf-8", decode_responses=True)
+        books = r.keys('book*')
+        books_found = set()
+        for book in books:
+            book_data = r.get(book)
+            author = query_data.get('author')
+            title = query_data.get('title')
+            description = query_data.get('description')
+            not_none_params = [i for i in params if i is not None]
+            for param in not_none_params:
+                if param.lower() in book_data.lower():
+                    books_found.add(book)
+        r.connection_pool.disconnect()
+        print('Books found: ', books_found)
+        if books_found:
+            with open('html/books/search.html') as f:
+                response = f.read()
+                for book in books_found:
+                    book_data = r.get(book)
+                    parser = MyHTMLParser()
+                    parser.feed(book_data)
+                    response += f'<li><a href="/books/{book.split("book")[1]}">{parser.data[0]}</a></li>'
+            return self.wfile.write(response.encode("utf-8"))
+        return self.wfile.write('No books found'.encode("utf-8"))
 
 def set_redis_keys():
     r = redis.StrictRedis(host='localhost', port=6379, db=0)
     for book in os.listdir('html/books'):
         with open(f'html/books/{book}') as book_file:
-            r.set(f'{book.split(".")[0]}', book_file.read())
-            print(f'Key {book} set')
+            if book.startswith('book'):
+                r.set(f'{book.split(".")[0]}', book_file.read())
+                print(f'Key {book} set')
     r.connection_pool.disconnect()
 
 if __name__ == "__main__":

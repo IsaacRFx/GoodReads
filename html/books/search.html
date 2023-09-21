@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Search</title>
+  </head>
+  <body>
+    <h1>Search</h1>
+    <form id="searchForm">
+      <label for="title">Título</label>
+      <input type="text" name="title" id="title" />
+      <label for="author">Autor</label>
+      <input type="text" name="author" id="author" />
+      <label for="description">Descripción</label>
+      <input type="text" name="description" id="description" />
+
+      <button>Buscar</button>
+    </form>
+  </body>
+
+  <script>
+    const params = () => {
+      const title = document.getElementById("title").value;
+      const author = document.getElementById("author").value;
+      const description = document.getElementById("description").value;
+
+      let params = []
+      if (title) params.push(`title=${title}`);
+      if (author) params.push(`author=${author}`);
+      if (description) params.push(`description=${description}`);
+
+      return params
+    };
+
+    const search = (e) => {
+      e.preventDefault();
+
+      const data = params();
+      hrefParams = data.join("&");
+      console.log(hrefParams);
+      
+      if (hrefParams){
+        window.location.href = `/books/search?${hrefParams}`; 
+      } else {
+        alert("No hay parámetros de búsqueda")
+      }
+    };
+
+    document.getElementById("searchForm").addEventListener("submit", search);
+  </script>
+</html>
