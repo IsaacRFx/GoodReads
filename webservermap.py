@@ -109,11 +109,15 @@ class WebRequestHandler(BaseHTTPRequestHandler):
         return self.wfile.write(response.encode("utf-8"))
     
     def get_search_books(self):
+        
         query_data = dict(parse_qsl(self.url.query))
         print(query_data)
         params = [query_data.get('author'), query_data.get('title'), query_data.get('description')]
         if not any(params):
-            with open('html/books/search.html') as f:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            with open('html/books/search.html', 'r') as f:
                 response = f.read()
             return self.wfile.write(response.encode("utf-8"))
 
@@ -143,7 +147,6 @@ class WebRequestHandler(BaseHTTPRequestHandler):
                 description_parser.feed(book_data)
                 if description.lower() not in description_parser.data[0].lower():
                     continue
-
             print('Book found: ', book)
             books_found.add(book)
 
@@ -153,6 +156,9 @@ class WebRequestHandler(BaseHTTPRequestHandler):
         with open('html/books/search.html') as f:
                 response = f.read()
         if books_found:
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html")
+                self.end_headers()
                 for book in books_found:
                     book_data = r.get(book)
                     title_parser = MyHTMLParser(('h2'), 'title')
@@ -160,6 +166,9 @@ class WebRequestHandler(BaseHTTPRequestHandler):
                     response += f'<br><li><a href="/books/{book.split("book")[1]}">{title_parser.data[0]}</a></li>'
                 return self.wfile.write(response.encode("utf-8"))
         response += '<p>No books found</p>'
+        self.send_response(404)
+        self.send_header("Content-Type", "text/html")
+        self.end_headers()
         return self.wfile.write(response.encode("utf-8"))
 
 def set_redis_keys():
@@ -173,6 +182,6 @@ def set_redis_keys():
 
 if __name__ == "__main__":
     print("Server starting...")
-    server = HTTPServer(("0.0.0.0", 80), WebRequestHandler)
+    server = HTTPServer(("0.0.0.0", 8000), WebRequestHandler)
     set_redis_keys()
     server.serve_forever()
