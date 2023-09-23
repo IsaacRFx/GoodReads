@@ -4,6 +4,10 @@
 
 <https://www.youtube.com/watch?v=nh885tFf06g&ab_channel=Aeramik>
 
+- [x] Configurado para CodeSpaces
+- [x] Instancia en AWS
+- [x] Video explicando código, funcionamiento y decisiones de diseño
+
 En este primer proyecto vamos a desarrollar una applicación web sencilla
 utilizando solamente la librería estándar de python y *Redis* un almacen de
 datos en memoria. 
