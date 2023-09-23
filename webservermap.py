@@ -130,7 +130,6 @@ class WebRequestHandler(BaseHTTPRequestHandler):
                 
                 f = f.replace("</html>", f'<h2>Vuelve a leer:</h2>{read_again}</html>')
             f = f.replace("</html>", '<br><h2><a href="\\">Volver al menú principal</a></h2></html>')
-            print(f)
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
             self.set_book_cookie(session_id)
