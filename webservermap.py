@@ -4,6 +4,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import os
 import re
 from urllib.parse import parse_qsl, urlparse
+import uuid
 import redis
 from html.parser import HTMLParser
 import html
@@ -16,7 +17,7 @@ import html
 
 class MyHTMLParser(HTMLParser):
 
-    def __init__(self, tagArray: tuple, tagValue: str):
+    def __init__(self, tagArray: tuple, tagValue: tuple):
         super().__init__()
         self.data = []
         self.capture = False
@@ -26,8 +27,7 @@ class MyHTMLParser(HTMLParser):
     def handle_starttag(self, tag, attrs):
         if tag in self.tagArray:
             for name, value in attrs:
-                if name == 'id' and value == self.tagValue:
-                    print('Encountered a start tag:', tag)
+                if name == 'id' and value in self.tagValue:
                     self.capture = True
 
     def handle_endtag(self, tag):
@@ -42,7 +42,6 @@ mapping = [
     (r"^/$", "get_index"),
     (r"^/books/(?P<book_id>\d+)$", "get_book"),
     (r"^/books/search$", "get_search_books"),
-    (r"^/results$", "get_results"),
 ]
 
 class WebRequestHandler(BaseHTTPRequestHandler):
@@ -50,22 +49,50 @@ class WebRequestHandler(BaseHTTPRequestHandler):
     # def url(self):
     #     return urlparse(self.path)
 
-    # @cached_property
-    # def query_data(self):
-    #     return dict(parse_qsl(self.url.query))
+    @cached_property
+    def cookies(self):
+        return SimpleCookie(self.headers.get("Cookie"))
+    
+    def set_book_cookie(self, session_id, max_age=100):
+        c = SimpleCookie()
+        c["session"] = session_id
+        c["session"]["max-age"] = max_age
+        self.send_header('Set-Cookie', c.output(header=''))
 
-    # @cached_property
-    # def post_data(self):
-    #     content_length = int(self.headers.get("Content-Length", 0))
-    #     return self.rfile.read(content_length)
+    def get_book_session(self):
+        c = self.cookies
+        if not c:
+            print("No cookie")
+            c = SimpleCookie()
+            c["session"] = uuid.uuid4()
+        else:
+            print("Cookie found")
+        return c.get("session").value
 
-    # @cached_property
-    # def form_data(self):
-    #     return dict(parse_qsl(self.post_data.decode("utf-8")))
-
-    # @cached_property
-    # def cookies(self):
-    #     return SimpleCookie(self.headers.get("Cookie"))
+    def get_book_suggestion(self, session_id, book_id):
+        r = redis.StrictRedis(host='localhost', port=6379, db=0, charset="utf-8", decode_responses=True)
+        books = r.keys('book*')
+        books_read = r.lrange(session_id, 0, -1)
+        if f'book{book_id}' not in books_read:
+            r.rpush(session_id, f'book{book_id}')
+        suggestions = ""
+        read_again = ""
+        print(session_id, books_read)
+        for book in books:
+            if book[-1] == book_id:
+                continue
+            if book not in books_read:
+                suggestion_title = MyHTMLParser(('h2'), ('title'))
+                suggestion_title.feed(r.get(book))
+                if suggestion_title.data:
+                    suggestions += f'<li><a href="/books/{book[-1]}">{suggestion_title.data[0]}</a></li>'
+                continue
+            read_again_title = MyHTMLParser(('h2'), ('title'))
+            read_again_title.feed(r.get(book))
+            if read_again_title.data:
+                read_again += f'<li><a href="/books/{book[-1]}">{read_again_title.data[0]}</a></li>'
+        return suggestions, read_again
+        
 
     def do_GET(self):
         self.url = urlparse(self.path)
@@ -76,7 +103,6 @@ class WebRequestHandler(BaseHTTPRequestHandler):
             method(**dict_params)
             return 
         else:
-            print("No se encontró el método")
             self.send_error(404, "Not Found") 
         # self.query_data = dict(parse_qsl(self.url.query))
         # self.send_response(200)
@@ -91,12 +117,23 @@ class WebRequestHandler(BaseHTTPRequestHandler):
                 return (method, match.groupdict())
             
     def get_book(self, book_id):
-        self.send_response(200)
-        self.send_header("Content-Type", "text/html")
-        self.end_headers()
+        
+        session_id = self.get_book_session()
         r = redis.StrictRedis(host='localhost', port=6379, db=0, charset="utf-8", decode_responses=True)
         if r.exists(f'book{book_id}'):
+            
+            book_suggestion, read_again = self.get_book_suggestion(session_id, book_id)
             f = r.get(f'book{book_id}')
+            if book_suggestion:
+                f = f.replace("</html>", f'<h2>Libros sugeridos:</h2>{book_suggestion}</html>')
+            if read_again:
+                
+                f = f.replace("</html>", f'<h2>Vuelve a leer:</h2>{read_again}</html>')
+            f = f.replace("</html>", '<br><h2><a href="\">Volver al menú principal</a></h2>')
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.set_book_cookie(session_id)
+            self.end_headers()
             return self.wfile.write(f.encode("utf-8"))
         return self.send_error(404, "Not Found in Redis")
 
@@ -104,6 +141,8 @@ class WebRequestHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "text/html")
         self.end_headers()
+        session_id = self.get_book_session()
+        self.set_book_cookie(session_id)
         with open ("html/index.html", "r") as f:
             response = f.read()
         return self.wfile.write(response.encode("utf-8"))
@@ -111,7 +150,6 @@ class WebRequestHandler(BaseHTTPRequestHandler):
     def get_search_books(self):
         
         query_data = dict(parse_qsl(self.url.query))
-        print(query_data)
         params = [query_data.get('author'), query_data.get('title'), query_data.get('description')]
         if not any(params):
             self.send_response(200)
@@ -132,27 +170,24 @@ class WebRequestHandler(BaseHTTPRequestHandler):
             not_none_params = [i for i in params if i is not None]
 
             if title:
-                title_parser = MyHTMLParser(('h2'), 'title')
+                title_parser = MyHTMLParser(('h2'), ('title'))
                 title_parser.feed(book_data)
                 if title.lower() not in title_parser.data[0].lower():
                     continue
             if author:
-                author_parser = MyHTMLParser(('p'), 'author')
+                author_parser = MyHTMLParser(('p'), ('author'))
                 author_parser.feed(book_data)
-                print(author_parser.data[0].lower(), author.lower())
                 if author.lower() not in author_parser.data[0].lower():
                     continue
             if description:
-                description_parser = MyHTMLParser(('p'), 'description')
+                description_parser = MyHTMLParser(('p'), ('description'))
                 description_parser.feed(book_data)
                 if description.lower() not in description_parser.data[0].lower():
                     continue
-            print('Book found: ', book)
             books_found.add(book)
 
         r.connection_pool.disconnect()
 
-        print('Books found: ', books_found)
         with open('html/books/search.html') as f:
                 response = f.read()
         if books_found:
@@ -161,9 +196,9 @@ class WebRequestHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 for book in books_found:
                     book_data = r.get(book)
-                    title_parser = MyHTMLParser(('h2'), 'title')
-                    title_parser.feed(book_data)
-                    response += f'<br><li><a href="/books/{book.split("book")[1]}">{title_parser.data[0]}</a></li>'
+                    book_info = MyHTMLParser(('h2', 'p'), ('title', 'author', 'description'))
+                    book_info.feed(book_data)
+                    response += f'<br><li><h3><a href="/books/{book.split("book")[1]}">{book_info.data[0]}</a></h3><p>{book_info.data[1]}</p><p>{book_info.data[2]}</p></li>'
                 return self.wfile.write(response.encode("utf-8"))
         response += '<p>No books found</p>'
         self.send_response(404)
