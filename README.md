@@ -4,6 +4,7 @@
 
 <https://www.youtube.com/watch?v=nh885tFf06g&ab_channel=Aeramik>
 
+- [x] Libros con descripción
 - [x] Configurado para CodeSpaces
 - [x] Instancia en AWS
 - [x] Video explicando código, funcionamiento y decisiones de diseño
